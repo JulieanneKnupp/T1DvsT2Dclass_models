@@ -1,0 +1,452 @@
+---
+title: "T1/T2D"
+author: "J.Knupp"
+date: "2023-02-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load necessary libraries
+```{r libraries}
+#Set working directory
+setwd("~/T1T2D")
+#load necessary packages
+#haven allows you to read in stata datasets (after stat version 12 - v5-12 use library(foreign)) into R
+library(haven)
+library(dplyr)
+library(ggplot2)
+library(psych)
+library(epiDisplay)
+#for running resticted cubic splines
+library(rms)
+library(Hmisc)
+#for providing aic for multple models
+library(AICcmodavg)
+library(jtools)
+
+```
+
+## 1. Dataset
+### 1.1 Read in dataset
+Read in dataset and filter relevant variables into new data.table. These are:
+-*outcome*: insulinRequire
+-*predictor variables*:
+-AgeatDiagnosis
+-bmi
+-sexMale
+-GADPositive975
+-IA2Positive975
+-z1w_score
+-HBA1CDescriptive
+```{r dataset}
+#read in dataset
+clinicalfeatures <- read_dta("clinicalFeaturesModelV2.dta")
+#filter out relevant variables
+cf <- subset(clinicalfeatures, select = c("AgeatDiagnosis", "insulinRequire", "bmi", "GADPositive975", "IA2Positive975", "sexMale", "z1w_score", "HBA1CDescriptive"))
+```
+
+### 1.2 Distributions of continuous traits
+#### 1.2.1 Age at diagnosis (aad)
+```{r aad distribution}
+#numerial distribution
+summary(cf$AgeatDiagnosis)
+#visualising bmi distribution
+aad_box <- ggplot(cf, aes(AgeatDiagnosis)) +
+  geom_boxplot() +
+  labs(title="Box and Whisker plot of Age at Diagnosis", 
+       font="bold")
+aad_box
+#produce density histogram
+ggplot(cf, aes(AgeatDiagnosis)) + 
+  geom_histogram(aes(y=..density..),fill="bisque",color="white",alpha=0.7, binwidth = 2) + 
+  geom_density() +
+  geom_rug() +
+  labs(x='Age at Diagnosis') +
+  theme_minimal()
+```
+No outliers present for aad
+
+#### 1.2.2 bmi
+```{r bmi distribution}
+#numerical distribution
+summary(cf$bmi)
+#visualising bmi distribution
+bmi_box <- ggplot(cf, aes(bmi)) +
+  geom_boxplot() +
+  labs(title="Box and Whisker plot of BMI", 
+       font="bold")
+bmi_box
+
+#distribution measures for bmi
+Q1_bmi <- quantile(cf$bmi, 0.25)
+Q3_bmi <- quantile(cf$bmi, 0.75)
+IQR_bmi <- Q3_bmi - Q1_bmi
+upp_thresh_bmi <- Q3_bmi + 1.5*IQR_bmi
+low_thresh_bmi <- Q1_bmi - 1.5*IQR_bmi
+
+#identify bmi outliers
+bmi_out <- cf %>%
+  filter(bmi < low_thresh_bmi | bmi > upp_thresh_bmi)
+head(bmi_out)
+
+#produce density histogram
+ggplot(cf, aes(bmi)) + 
+  geom_histogram(aes(y=..density..),fill="bisque",color="white",alpha=0.7, binwidth = 2) + 
+  geom_density() +
+  geom_rug() +
+  labs(x='bmi') +
+  theme_minimal()
+```
+21 outliers for BMI
+
+### 1.3 Relationship between continuous predictors
+```{r correlation}
+#scatterplot btwn aad and bmi
+scat_aad_bmi <- ggplot(cf, aes(AgeatDiagnosis, bmi)) +
+  geom_point()
+scat_aad_bmi
+
+#scatterplot matrix aad and bmi
+scatmat_aad_bmi <- pairs(cf[c("AgeatDiagnosis", "bmi")])
+scatmat_aad_bmi
+
+#correlation coefficents
+cor_aad_bmi <- cor(cf$bmi, cf$AgeatDiagnosis)
+cor_aad_bmi
+```
+
+### 1.4 Outcome variable
+#### 1.4.1 Frequency of binary outcome
+```{r iR proportions}
+#summarise outcomes (insulinRequire)
+count_iR <- tab1(cf$insulinRequire, cum.percent = TRUE, main = "Insulin Required")
+#proportions of whether require insulin (1) or not (0)
+c <- cf %>%
+  count(insulinRequire, name = "n") %>%
+  mutate(prop = n/sum(n)) %>%
+  filter(insulinRequire == "1") %>%
+ mutate(odds = prop/(1 - prop),
+    log_odds = log(prop/(1 - prop)))
+c
+
+```
+
+#### 1.4.2 Distributions of continuous predictors based on binary outcome
+```{r distributions of predictors based on outcome}
+#bmi
+#histogram based on outcome
+ggplot(cf, aes(bmi)) +
+  geom_histogram() +
+  facet_wrap(vars(insulinRequire))
+#summarise sorted by outcome
+summ_iR_bmi <-  describeBy(cf$bmi, cf$insulinRequire)
+#violin plot of bmi distrubution across whether require insulin(1) or not (0)
+ggplot(cf, aes(x = bmi, y = insulinRequire)) +
+ geom_violin() +
+ ylab("Require Insulin")
+
+#AgeatDiagnosis
+#histogram based on outcome
+ggplot(cf, aes(AgeatDiagnosis)) +
+  geom_histogram() +
+  facet_wrap(vars(insulinRequire))
+#summarise sorted by outcome
+summ_iR_aad <-  describeBy(cf$AgeatDiagnosis, cf$insulinRequire)
+#violin plot of bmi distrubution across whether require insulin(1) or not (0)
+ggplot(cf, aes(x = AgeatDiagnosis, y = insulinRequire)) +
+ geom_violin() +
+ ylab("Require Insulin")
+
+#z1w_score
+#histogram based on outcome
+ggplot(cf, aes(z1w_score)) +
+  geom_histogram() +
+  facet_wrap(vars(insulinRequire))
+#summarise sorted by outcome
+summ_iR_z1w <-  describeBy(cf$z1w_score, cf$insulinRequire)
+
+#HBA1CDescriptive
+#histogram based on outcome
+ggplot(cf, aes(HBA1CDescriptive)) +
+  geom_histogram() +
+  facet_wrap(vars(insulinRequire))
+#summarise sorted by outcome
+summ_iR_HBA1C <-  describeBy(cf$HBA1CDescriptive, cf$insulinRequire)
+
+#scatterplots of bmi &aad by insulinRequire
+ggplot(cf, aes(AgeatDiagnosis, bmi)) +
+  geom_point() +
+  facet_wrap(vars(insulinRequire))
+
+#summarise aad, sorting by insulinRequire & sexMale
+summ_iR_sex_aad <-  describeBy(cf$AgeatDiagnosis, list(cf$insulinRequire, cf$sexMale))
+
+```
+
+#### 1.4.3 Distributions of binary predictors based on outcome variable
+```{r distrinbution binary predicotrs by outcome}
+#summarise categorical vairables using two way tables
+#include frequencies, relative frequencies, pearsons chi squared, expected frequencies
+#sexMale and insulinRequire
+#Q - how to I combine all metrics into one table, and how add row and column names?
+#describe function from psych library - select columns, dplyr (dataset>select columns> describe)
+sex_iR_tbl <- table(cf$sexMale, cf$insulinRequire)
+#performs chiquared test and outputs as list
+summary(sex_iR_tbl)
+#barplot of two way tablechi
+barplot(sex_iR_tbl)
+
+#GADPositive975 and insulinRequire
+GAD_iR_tbl <- table(cf$GADPositive975, cf$insulinRequire)
+#performs chiquared test and outputs as list
+summary(GAD_iR_tbl)
+#barplot of two way tablechi
+barplot(GAD_iR_tbl)
+
+#IA2Positive975 and insulinRequire
+IA2_iR_tbl <- table(cf$IA2Positive975, cf$insulinRequire)
+#performs chiquared test and outputs as list
+summary(IA2_iR_tbl)
+#barplot of two way tablechi
+barplot(IA2_iR_tbl)
+```
+
+## 2. Univariate logistic regression models
+### 2.1 BMI
+#### 2.1.1 Simple
+```{r bmi simple log reg}
+#logistic regression for bmi (continuous trait)
+mdl_iR_vs_bmi <- glm(insulinRequire ~ bmi, data = cf, family = "binomial")
+summary(mdl_iR_vs_bmi)
+#perform prediction on same datasets - new variable containing the prediction
+cf <- cf %>%
+  mutate(pr_iR_vs_bmi = predict(mdl_iR_vs_bmi, cf, type = "response"))
+#perform prediction on same datasets - new variable containing the prediction in log odds
+cf <- cf %>%
+  mutate(lo_iR_vs_bmi = predict(mdl_iR_vs_bmi, cf))
+pr <- predict(mdl_iR_vs_bmi, cf, type = "response")
+#convert to numeric
+cf$bim <- as.numeric(cf$bmi)
+cf$insulinRequire <- as.numeric(cf$insulinRequire)
+#visualisation
+#how to I include the abline?
+ggplot(cf, aes(bmi, insulinRequire)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 20) +
+  geom_smooth(method="glm", method.args = list(family = "binomial"))
+#plotting - gives same plot essentially as prediction plot with ggplot above
+effect_plot(mdl_iR_vs_bmi, pred = bmi, plot.points = TRUE,
+            jitter = c(0.1, 0.05), point.alpha = 0.1) +
+  ylab("Pr(insulinRequire = 1)")
+```
+##### 2.1.1.1 Binned vs log odds 
+```{r bin bmi}
+#data bining plot
+#identify decile cut-offs
+quantile(cf$bmi, probs = seq(0,1,0.1))
+#set up cutoff values
+breaks <- c(17.53, 24.73, 27.05, 28.97, 30.94, 32.75, 34.79, 36.68, 39.45, 43.998, 70.16)
+#specify interval/bin labels
+tags <- c("[17.53, 24.73)", "[24.73, 27.05)", "[27.05, 28.97)", "[28.97, 30.94)", "[30.94,32.75)", "[32.75, 34.79)", "[34.79, 36.68)", "[36.68, 39.45)", "[39.45, 43.998)", "[43.998, 70.16)")
+#sort values into decile bins
+v <- cf %>%
+  dplyr::select(bmi, insulinRequire) #pick the variable 
+vgroup <- as_tibble(v) %>% 
+  mutate(tag = case_when(
+    bmi >= 17.53 & bmi < 24.73 ~ tags[1],
+    bmi >= 24.73 & bmi < 27.05 ~ tags[2],
+    bmi >= 27.05 & bmi < 28.97 ~ tags[3],
+    bmi >= 28.97 & bmi < 30.94 ~ tags[4],
+    bmi >= 30.94 & bmi < 32.75 ~ tags[5],
+    bmi >= 32.75 & bmi < 34.79 ~ tags[6],
+    bmi >= 34.79 & bmi < 36.68 ~ tags[7],
+    bmi >= 36.68 & bmi < 39.45 ~ tags[8],
+    bmi >= 39.45 & bmi < 43.998 ~ tags[9],
+    bmi > 43.998 ~ tags[10],
+    ))
+summary(vgroup)
+vgroup <- vgroup %>%
+  mutate(lo_iR_vs_bmi = predict(mdl_iR_vs_bmi, cf))
+v_bin_log <- vgroup %>%
+  group_by(tag) %>%
+  summarise(median_score=median(lo_iR_vs_bmi))
+ggplot(v_bin_log, aes(tag, median_score)) +
+  geom_point() +
+  labs(x = 'BMI decile bins', y = 'median log odds of T1D')
+
+```
+
+#### 2.1.2 Transformations
+
+#### 2.1.3 Spline transformation
+```{r bmi cubic splines}
+#plot function requires variables to be in numeric format
+#run with 3, 4 & 5 knots
+#how do I get the summary stats to automatically be attached - error message when run in chunk
+#rcspline.plot(as.numeric(cf$bmi), as.numeric(cf$insulinRequire), model="logistic", nk=3)
+#rcspline.plot(as.numeric(cf$bmi), as.numeric(cf$insulinRequire), model="logistic", nk=4)
+#rcspline.plot(as.numeric(cf$bmi), as.numeric(cf$insulinRequire), model="logistic", nk=5)
+
+#run a non spline log regression, then one each with knots = 3, 4, 5 respectively
+b0 <- lrm(insulinRequire ~ bmi, data = cf)
+b1 <- lrm(insulinRequire ~ rcs(bmi, 3), data = cf)
+b2 <- lrm(insulinRequire ~ rcs(bmi, 4), data = cf)
+b3 <- lrm(insulinRequire ~ rcs(bmi, 5), data = cf)
+
+dd <- datadist(cf)
+options(datadist="dd")
+summary(b0)
+summary(b1)
+summary(b2)
+summary(b3)
+
+#run anovas on each to see Wald statistics
+anova(b0)
+anova(b1)
+anova(b2)
+anova(b3)
+
+#get aic
+#why is this different to the plot AIC values for m1 etc.
+bAIC <- c(b0 = AIC(b0), b1 = AIC(b1), b2 = AIC(b2), b3 = AIC(b3))
+bAIC
+
+```
+
+
+### 2.2 Age at Diagnosis
+#### 2.2.1 Simple
+```{r aad log reg}
+#logistic regression for AgeatDiagnosis (continuous trait)
+mdl_iR_vs_aad <- glm(insulinRequire ~ AgeatDiagnosis, data = cf, family = "binomial")
+summary(mdl_iR_vs_aad)
+#perform prediction on same datasets - new variable containing the prediction
+cf <- cf %>%
+  mutate(pr_iR_vs_aad = predict(mdl_iR_vs_aad, cf, type = "response"))
+#perform prediction on same datasets - new variable containing the prediction in log odds
+cf <- cf %>%
+  mutate(lo_iR_vs_aad = predict(mdl_iR_vs_aad, cf))
+bpr <- predict(mdl_iR_vs_aad, cf, type = "response")
+#visualisation
+#how to I include the abline?
+ggplot(cf, aes(AgeatDiagnosis, insulinRequire)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 20) +
+  geom_smooth(method="glm", method.args = list(family = "binomial"))
+#plotting - gives same plot essentially as prediction plot with ggplot above
+effect_plot(mdl_iR_vs_aad, pred = AgeatDiagnosis, plot.points = TRUE,
+            jitter = c(0.1, 0.05), point.alpha = 0.1) +
+  ylab("Pr(insulinRequire = 1)")
+```
+
+##### 2.2.1.1 Binned vs log odds 
+```{r bin aad}
+#data bining plot
+#identify decile cut-offs
+quantile(cf$AgeatDiagnosis, probs = seq(0,1,0.1))
+#set up cutoff values
+wbreaks <- c(18, 29, 35, 38, 41, 43, 45, 47, 48, 50, 50)
+#specify interval/bin labels
+wtags <- c("[18, 29)", "[29, 35)", "[35, 38)", "[38, 41)", "[41,43)", "[43, 45)", "[45, 47)", "[47, 48)", "[48, 50)", "[50, 60)")
+#sort values into decile bins
+w <- cf %>%
+  dplyr::select(AgeatDiagnosis, insulinRequire) #pick the variable 
+wgroup <- as_tibble(w) %>% 
+  mutate(tag = case_when(
+    AgeatDiagnosis >= 18 & AgeatDiagnosis < 29 ~ wtags[1],
+    AgeatDiagnosis >= 29 & AgeatDiagnosis < 35 ~ wtags[2],
+    AgeatDiagnosis >= 35 & AgeatDiagnosis < 38 ~ wtags[3],
+    AgeatDiagnosis >= 38 & AgeatDiagnosis < 41 ~ wtags[4],
+    AgeatDiagnosis >= 41 & AgeatDiagnosis < 43 ~ wtags[5],
+    AgeatDiagnosis >= 43 & AgeatDiagnosis < 45 ~ wtags[6],
+    AgeatDiagnosis >= 45 & AgeatDiagnosis < 47 ~ wtags[7],
+    AgeatDiagnosis >= 47 & AgeatDiagnosis < 48 ~ wtags[8],
+    AgeatDiagnosis >= 48 & AgeatDiagnosis < 50 ~ wtags[9],
+    AgeatDiagnosis > 50 ~ wtags[10],
+    ))
+summary(wgroup)
+wgroup <- wgroup %>%
+  mutate(lo_iR_vs_aad = predict(mdl_iR_vs_aad, cf))
+w_bin_log <- wgroup %>%
+  group_by(tag) %>%
+  summarise(median_score=median(lo_iR_vs_aad))
+ggplot(w_bin_log, aes(tag, median_score)) +
+  geom_point() +
+  labs(x = 'Age at Diagnosis decile bins', y = 'median log odds of T1D')
+
+```
+
+#### 2.2.2 Transformations
+
+#### 2.2.3 Spline transformation
+```{r aad cubic splines}
+#plot function requires variables to be in numeric format
+#run with 3, 4 & 5 knots
+#how do I get the summary stats to automatically be attached - error message when run in chunk
+#rcspline.plot(as.numeric(cf$AgeatDiagnosis), as.numeric(cf$insulinRequire), model="logistic", nk=3)
+#rcspline.plot(as.numeric(cf$AgeatDiagnosis), as.numeric(cf$insulinRequire), model="logistic", nk=4)
+#rcspline.plot(as.numeric(cf$AgeatDiagnosis), as.numeric(cf$insulinRequire), model="logistic", nk=5)
+
+#run a non spline log regression, then one each with knots = 3, 4, 5 respectively
+m0 <- lrm(insulinRequire ~ AgeatDiagnosis, data = cf)
+m1 <- lrm(insulinRequire ~ rcs(AgeatDiagnosis, 3), data = cf)
+m2 <- lrm(insulinRequire ~ rcs(AgeatDiagnosis, 4), data = cf)
+m3 <- lrm(insulinRequire ~ rcs(AgeatDiagnosis, 5), data = cf)
+
+dd <- datadist(cf)
+options(datadist="dd")
+summary(m0)
+summary(m1)
+summary(m2)
+summary(m3)
+
+#run anovas on each to see Wald statistics
+anova(m0)
+anova(m1)
+anova(m2)
+anova(m3)
+
+#get aic
+#why is this different to the plot AIC values for m1 etc.
+mAIC <- c(m0 = AIC(m0), m1 = AIC(m1), m2 = AIC(m2), m3 = AIC(m3))
+mAIC
+
+```
+*no knots*
+AIC = 787.3316
+
+*knots = 3*
+n=1352, d=179
+x2 = 278.08
+AIC = 274.08
+Wald association 223.22, p=0.0000
+Wald linearity 4.511, p=0.0337* (anova)
+
+*knots = 4*
+n=1352, d=179
+x2 = 278.78
+AIC = 272.78
+Wald association 221.02, p=0.0000
+Wald linearity 5.04, p=0.0803 (anova)
+
+*knots = 5*
+n=1352, d=179
+x2 = 279.00
+AIC = 271.00
+Wald association 219.53, p=0.0000
+Wald linearity 5.23, p=0.1557 (anova)
+
+PLOT
+Relationship seems linear, knots = 5 seems best according to AIC, Wald association is 0.000 (stat sig for all three), but only stat sig for knots = 3
+AIC TBL
+Agrees with Wald association - lowest is for 3 knots
+
+### Calibration
+```{r calibration}
+###extract quantiles for predicted probabilities - how do I get this to focus on log odds and then plot this against the quantiles?
+bmi_valprob <- val.prob(p = pr, y = cf$insulinRequire, logit = cf$lo_iR_vs_bmi, group = cf$bmi, g.group = 10)
+plot(bmi_valprob, xlab = "predicted probability", ylab = "actual probability")
+```
