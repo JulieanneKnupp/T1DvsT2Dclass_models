@@ -51,7 +51,7 @@ cf <- subset(clinicalfeatures, select = c("AgeatDiagnosis", "insulinRequire", "b
 ### 1.2 Distributions of continuous traits
 #### 1.2.1 Age at diagnosis (aad)
 ```{r aad distribution}
-#numerial distribution
+#numerical distribution
 summary(cf$AgeatDiagnosis)
 #visualising bmi distribution
 aad_box <- ggplot(cf, aes(AgeatDiagnosis)) +
@@ -281,7 +281,7 @@ ggplot(v_bin_log, aes(tag, median_score)) +
 
 #### 2.1.2 Transformations
 
-#### 2.1.3 Spline transformation
+##### 2.1.2.1 Spline transformation
 ```{r bmi cubic splines}
 #plot function requires variables to be in numeric format
 #run with 3, 4 & 5 knots
@@ -314,8 +314,33 @@ anova(b3)
 bAIC <- c(b0 = AIC(b0), b1 = AIC(b1), b2 = AIC(b2), b3 = AIC(b3))
 bAIC
 
-```
+#perform prediction of three knots on same datasets - new variable containing the prediction
+pr3 <- predict(b1, cf, type = "fitted")
 
+```
+##### 2.1.2.2 Log transformation
+```{r log bmi}
+mdl_iR_vs_log_bmi <- glm(insulinRequire ~ log(bim), data = cf, family = "binomial")
+summary(mdl_iR_vs_log_bmi)
+#perform prediction on same datasets - new variable containing the prediction
+cf <- cf %>%
+  mutate(pr_iR_vs_log_bmi = predict(mdl_iR_vs_log_bmi, cf, type = "response"))
+#perform prediction on same datasets - new variable containing the prediction in log odds
+cf <- cf %>%
+  mutate(lo_iR_vs_log_bmi = predict(mdl_iR_vs_log_bmi, cf))
+pr_log <- predict(mdl_iR_vs_log_bmi, cf, type = "response")
+#visualisation
+#how to I include the abline?
+ggplot(cf, aes(log(bmi), insulinRequire)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 20) +
+  geom_smooth(method="glm", method.args = list(family = "binomial"))
+#plotting - gives same plot essentially as prediction plot with ggplot above
+#Would need a new variable that is log(bmi)
+#effect_plot(mdl_iR_vs_log_bmi, pred = bmi, plot.points = TRUE,
+            #jitter = c(0.1, 0.05), point.alpha = 0.1) +
+  #ylab("Pr(insulinRequire = 1)")
+```
 
 ### 2.2 Age at Diagnosis
 #### 2.2.1 Simple
@@ -381,7 +406,7 @@ ggplot(w_bin_log, aes(tag, median_score)) +
 
 #### 2.2.2 Transformations
 
-#### 2.2.3 Spline transformation
+##### 2.2.2.1 Spline transformation
 ```{r aad cubic splines}
 #plot function requires variables to be in numeric format
 #run with 3, 4 & 5 knots
@@ -414,6 +439,9 @@ anova(m3)
 mAIC <- c(m0 = AIC(m0), m1 = AIC(m1), m2 = AIC(m2), m3 = AIC(m3))
 mAIC
 
+#perform prediction of three knots on same datasets - new variable containing the prediction
+bpr3 <- predict(m1, cf, type = "fitted")
+
 ```
 *no knots*
 AIC = 787.3316
@@ -444,9 +472,43 @@ Relationship seems linear, knots = 5 seems best according to AIC, Wald associati
 AIC TBL
 Agrees with Wald association - lowest is for 3 knots
 
+##### 2.2.2.2 Log transformation
+```{r log aad}
+mdl_iR_vs_log_aad <- glm(insulinRequire ~ log(AgeatDiagnosis), data = cf, family = "binomial")
+summary(mdl_iR_vs_log_aad)
+#perform prediction on same datasets - new variable containing the prediction
+cf <- cf %>%
+  mutate(pr_iR_vs_log_aad = predict(mdl_iR_vs_log_aad, cf, type = "response"))
+#perform prediction on same datasets - new variable containing the prediction in log odds
+cf <- cf %>%
+  mutate(lo_iR_vs_log_aad = predict(mdl_iR_vs_log_aad, cf))
+bpr_log <- predict(mdl_iR_vs_log_aad, cf, type = "response")
+#visualisation
+#how to I include the abline?
+ggplot(cf, aes(log(AgeatDiagnosis), insulinRequire)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 20) +
+  geom_smooth(method="glm", method.args = list(family = "binomial"))
+#plotting - gives same plot essentially as prediction plot with ggplot above
+#Would need a new variable that is log(AgeatDiagnosis)
+#effect_plot(mdl_iR_vs_log_aad, pred = AgeatDiagnosis, plot.points = TRUE,
+            #jitter = c(0.1, 0.05), point.alpha = 0.1) +
+  #ylab("Pr(insulinRequire = 1)")
+```
+
 ### Calibration
 ```{r calibration}
-###extract quantiles for predicted probabilities - how do I get this to focus on log odds and then plot this against the quantiles?
-bmi_valprob <- val.prob(p = pr, y = cf$insulinRequire, logit = cf$lo_iR_vs_bmi, group = cf$bmi, g.group = 10)
-plot(bmi_valprob, xlab = "predicted probability", ylab = "actual probability")
+#calibration plot for simple bmi regression
+bmi_valprob <- val.prob(p = pr, y = cf$insulinRequire)
+#calibration plot for three splines bmi regression
+bmi3_valprob <- val.prob(p = pr3, y = cf$insulinRequire)
+#calibration plot for log bmi regression
+bmi_log_valprob <- val.prob(p = pr_log, y = cf$insulinRequire)
+
+#calibration for simple aad
+aad_valprob <- val.prob(p = bpr, y = cf$insulinRequire)
+#calibration for three splines aad
+aad3_valprob <- val.prob(p = bpr3, y = cf$insulinRequire)
+#calibration for log aad regression
+aad_log_valprob <- val.prob(p = bpr_log, y = cf$insulinRequire)
 ```
